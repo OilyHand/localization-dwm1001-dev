@@ -39,6 +39,7 @@ static const struct bt_data advert[] = {
 /*---------------------------------------------------------------------------*/
 static void connected_cb(struct bt_conn * conn, uint8_t err)
 {
+    printk("<ble> ");
     if (err) {
         printk("Connection failed: err %u\n", err);
     }
@@ -56,7 +57,8 @@ static void connected_cb(struct bt_conn * conn, uint8_t err)
 /*---------------------------------------------------------------------------*/
 static void disconnected_cb(struct bt_conn * conn, uint8_t reason)
 {
-    printk("Disconnected: reason %u\n", reason);
+    
+    printk("<ble> Disconnected: reason %u\n", reason);
 
     if (default_conn) {
         bt_conn_unref(default_conn);
@@ -108,6 +110,7 @@ int ble_disconnect(void)
 /*---------------------------------------------------------------------------*/
 static void bt_ready(int err)
 {
+    printk("<ble> ");
     if (err) {
         printk("Bluetooth initialization failed: %d\n", err);
         return;
@@ -129,6 +132,8 @@ int ble_start_advertising(void)
     scan->data_len = DeviceIdLen;
     scan->data     = DeviceId;
 
+    printk("<ble> ");
+
     err = bt_le_adv_start(BT_LE_ADV_CONN,
                           advert, ARRAY_SIZE(advert),
                           scan,   ARRAY_SIZE(scan));
@@ -149,6 +154,8 @@ int ble_stop_advertising(void)
 {
     int err;
 
+    printk("<ble> ");
+
     err = bt_le_adv_stop();
     if (err) {
         printk("Stop advertising failed: %d\n", err);
@@ -161,14 +168,14 @@ int ble_stop_advertising(void)
 
 /*---------------------------------------------------------------------------*/
 /*                                                                           */
-/*---------------------------------------------------------------------------*/
+/*------------------------------------b> ---------------------------------------*/
 static void auth_cancel(struct bt_conn *conn)
 {
     char addr[BT_ADDR_LE_STR_LEN];
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-    printk("Pairing cancelled: %s\n", addr);
+    printk("<ble> Pairing cancelled: %s\n", addr);
 }
 
 static struct bt_conn_auth_cb  auth_cb_display = {
@@ -200,7 +207,7 @@ int ble_base_init(void)
 
     err = bt_enable(bt_ready);
     if (err) {
-        printk("Bluetooth initialization failed: %d\n", err);
+        printk("<ble> Bluetooth initialization failed: %d\n", err);
         return err;
     }
 

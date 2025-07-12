@@ -16,7 +16,7 @@ LOG_MODULE_REGISTER(main);
 // Device information
 #define APP_HEADER  "*** DWM1001-Ranging Project ***\n"
 #define DEV_TYPE    "Anchor\n"
-#define APP_LINE    "============================\n"
+#define APP_LINE    "===============================\n"
 
 // Default communication configuration
 dwt_config_t config = {
@@ -57,7 +57,7 @@ dwt_config_t config = {
 // DEVICE INFORMATION                                                         //
 ////////////////////////////////////////////////////////////////////////////////
 #define DEVICE_TAG_ID 0xAA01
-#define DEVICE_ANC_ID 0xBB02
+#define DEVICE_ANC_ID 0xBB01
 
 ////////////////////////////////////////////////////////////////////////////////
 // RANGING MESSAGES                                                           //
@@ -83,6 +83,7 @@ dwt_config_t config = {
 #define FRAME_MSG_REPORT_LEN 14
 
 static uint8 anchor_resp_msg[] = {
+// Data Frame MAC Header
     // Frame Control
     0x41, 0x8C,
     // Sequence Number (SN)
@@ -92,7 +93,8 @@ static uint8 anchor_resp_msg[] = {
     // Dest. Address (Tag Short Address)
     0x01, 0xAA,
     // Source Address
-    0x02, 0xBB,
+    0x01, 0xBB,
+// Data Frame MAC Payload
     // Function Code (0x50 for resp msg)
     0x50,
     // For FCS
@@ -100,6 +102,7 @@ static uint8 anchor_resp_msg[] = {
 };
 
 static uint8 anchor_report_msg[] = {
+// Data Frame MAC Header
     // Frame Control
     0x41, 0x8C,
     // Sequence Number (SN)
@@ -107,9 +110,10 @@ static uint8 anchor_report_msg[] = {
     // PAN ID
     0xCA, 0xDE,
     // Dest. Address (Tag Short Address)
-    0xAA, 0x01,
+    0x01, 0xAA,
     // Source Address
-    0xBB, 0x01,
+    0x01, 0xBB,
+// Data Frame MAC Payload
     // Function Code
     0x51,
     // Calculated Time-of-Flight (ToF)
@@ -197,6 +201,7 @@ int dw_main(void) {
     printk(APP_HEADER);
     printk("Device Type: ");
     printk(DEV_TYPE);
+    printk("Device ID: 0x%04X\n", DEVICE_ANC_ID);
     printk(APP_LINE);
 
     // Initialize the DW1000
@@ -204,7 +209,7 @@ int dw_main(void) {
     reset_DW1000();
     port_set_dw1000_slowrate();
     if (dwt_initialise(DWT_LOADUCODE) == DWT_ERROR) {
-        printk("INIT FAILED");
+        printk("<ranging> DW1000 initialization failed!\n");
         k_sleep(K_MSEC(500));
         while (1)
         { };
@@ -231,7 +236,7 @@ int dw_main(void) {
         k_yield();
         dwt_setrxtimeout(0);
         dwt_rxenable(DWT_START_RX_IMMEDIATE);
-        printk("Ranging State: 0x%02X (POLL: 0x00, FINAL: 0x01)\n", RNGST);
+        printk("<ranging> State: 0x%02X (POLL: 0x00, FINAL: 0x01)\n", RNGST);
 
         while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) &
             (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR)))
@@ -246,16 +251,39 @@ int dw_main(void) {
                 dwt_readrxdata(rx_buffer, frame_len, 0);
             }
 
+            dwt_forcetrxoff();
+            dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
             // Frame Control Check
             uint16 mhr_fc = rx_buffer[0] | (rx_buffer[1] << 8);
-            if(mhr_fc != MHR_FC_DAT) continue;
+            if(mhr_fc != MHR_FC_DAT) {
+                printk("<ranging> Invalid Frame Control\n");
+                continue;
+            }
 
             frame_seq_nb = rx_buffer[ALL_MSG_SN_IDX];
             uint16 mhr_dstadr = rx_buffer[5] | (rx_buffer[6] << 8);
             uint16 mhr_srcadr = rx_buffer[7] | (rx_buffer[8] << 8);
             uint16 func_code = rx_buffer[9];
 
-            if((mhr_dstadr != DEVICE_ANC_ID) | (mhr_srcadr != DEVICE_TAG_ID)) continue;
+            printk("------------------------------------------------------------\n");
+            printk("Received Frame: ");
+            for(int i = 0; i < frame_len; i++) {
+                printk("%02X ", rx_buffer[i]);
+            } printk("\n");
+            
+            printk(" - Sequence Number: %d\n", frame_seq_nb);
+            printk(" - Destination Address: 0x%04X\n", mhr_dstadr);
+            printk(" - Source Address: 0x%04X\n", mhr_srcadr);
+            printk(" - Function Code: 0x%02X\n", func_code);
+
+            printk("------------------------------------------------------------\n");
+
+
+            if((mhr_dstadr != DEVICE_ANC_ID) | (mhr_srcadr != DEVICE_TAG_ID)) {
+                printk("<ranging> Invalid destination or source address\n");
+                continue;
+            }
 
             if(RNGST == RNGST_POLL){
                 if(func_code != MSG_TYPE_POLL) {
@@ -263,14 +291,14 @@ int dw_main(void) {
                     continue;
                 }
 
-                printk("Received POLL: ");
+                printk("<ranging> Received POLL: ");
                 for(int i = 0; i < frame_len; i++) {
                     printk("%02X ", rx_buffer[i]);
                 } printk("\n");
 
                 anchor_resp_msg[ALL_MSG_SN_IDX] = frame_seq_nb;
 
-                printk("Sended RESP: ");
+                printk("<ranging> Sended RESP: ");
                 for(int i=0; i < sizeof(anchor_resp_msg); i++) {
                     printk("%02X ", anchor_resp_msg[i]);
                 } printk("\n");
@@ -284,7 +312,10 @@ int dw_main(void) {
 
                 dwt_writetxdata(sizeof(anchor_resp_msg), anchor_resp_msg, 0);
                 dwt_writetxfctrl(sizeof(anchor_resp_msg), 0, 1);
-                if (dwt_starttx(DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED) == DWT_ERROR) continue;
+                if (dwt_starttx(DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED) == DWT_ERROR){
+                    printk("<ranging> Error starting transmission\n");
+                    continue;
+                }
 
                 RNGST = RNGST_FINL;
             } else if(RNGST == RNGST_FINL) {
@@ -292,7 +323,7 @@ int dw_main(void) {
                     RNGST = RNGST_POLL;
                     continue;
                 }
-                printk("Received FINAL: ");
+                printk("<ranging> Received FINAL: ");
                 for(int i = 0; i < frame_len; i++) {
                     printk("%02X ", rx_buffer[i]);
                 } printk("\n");
@@ -320,7 +351,7 @@ int dw_main(void) {
 
                 char str[32];
                 snprintf(str, sizeof(str), "%.3f", distance);
-                printk("Distance: %s [m]\n", str);
+                printk("<ranging> Distance: %s [m]\n", str);
 
                 ble_reps->cnt = 1;
                 ble_reps->ble_rep[0].seq_nb = frame_seq_nb;

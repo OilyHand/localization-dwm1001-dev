@@ -120,7 +120,7 @@ static void ble_queue_service(void)
     int status;
     ble_msg_t msg;
 
-    printk("%s: started\n", __func__);
+    printk("<ble> %s: started\n", __func__);
 
     while (1) {
 
@@ -149,7 +149,8 @@ void ble_device_name(void)
 
     DeviceIdLen = strlen(DeviceId);
 
-    printk("DeviceId: %s\n", DeviceId);
+    printk("<ble> Device ID: %s\n", DeviceId);
+
 }
 
 /*---------------------------------------------------------------------------*/
@@ -175,7 +176,6 @@ static int ble_queue_init(void)
 int ble_device_init(void)
 {
     int status;
-    printk(" *** Starting BLE Device initialization\n");
 
     /* Create unique device identifier. */
     ble_device_name();
