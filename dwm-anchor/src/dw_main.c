@@ -274,9 +274,6 @@ int dw_main(void) {
 #endif
             }
 
-            dwt_forcetrxoff();
-            dwt_rxenable(DWT_START_RX_IMMEDIATE);
-
             // FC Check
             uint16 mhr_fc = rx_buffer[0] | (rx_buffer[1] << 8);
             if(mhr_fc != MHR_FC_TYPE_DATA) {
@@ -297,7 +294,18 @@ int dw_main(void) {
             printk(" - Sequence Number: %d\n", frame_seq_nb);
             printk(" - Destination Address: 0x%04X\n", mhr_dstadr);
             printk(" - Source Address: 0x%04X\n", mhr_srcadr);
-            printk(" - Function Code: 0x%02X\n", func_code);
+            printk(" - Function Code: ");
+            if(func_code == MSG_TYPE_POLL) {
+                printk("POLL\n");
+            } else if(func_code == MSG_TYPE_RESP) {
+                printk("RESP\n");
+            } else if(func_code == MSG_TYPE_FINL) {
+                printk("FINAL\n");
+            } else if(func_code == MSG_TYPE_REPO) {
+                printk("REPORT\n");
+            } else {
+                printk("UNKNOWN (0x%02X)\n", func_code);
+            }
             printk("------------------------------------------------------------\n");
 #endif
 
@@ -337,7 +345,10 @@ int dw_main(void) {
 
                 dwt_writetxdata(sizeof(anchor_resp_msg), anchor_resp_msg, 0);
                 dwt_writetxfctrl(sizeof(anchor_resp_msg), 0, 1);
-                if (dwt_starttx(DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED) == DWT_ERROR){
+                int rc = dwt_starttx(DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
+                printk("<ranging> return code: %d\n", rc);
+
+                if (rc == DWT_ERROR){
                     printk("<ranging> Error starting transmission\n");
                     continue;
                 }
@@ -347,6 +358,8 @@ int dw_main(void) {
             } else if (ranging_state == RNGST_FINAL){
                 // FINAL MESSAGE RECEIVE
                 if(func_code != MSG_TYPE_FINL){
+                    printk("<ranging> not a FINAL frame\n");
+                    ranging_state = RNGST_POLL;
                     continue;
                 }
             #ifdef DEBUG
