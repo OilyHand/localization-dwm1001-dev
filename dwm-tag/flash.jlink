@@ -1,0 +1,9 @@
+device nRF52832_XXAA
+if SWD
+speed 4000
+r                       
+h                       
+loadfile .pio/build/decawave_dwm1001_dev/firmware.hex
+r                       
+g                       
+exit
