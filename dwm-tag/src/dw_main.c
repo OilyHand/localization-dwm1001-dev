@@ -130,7 +130,7 @@ static uint64 final_tx_ts;
 
 typedef unsigned long long uint64;
 
-static uint64 get_tx_timestamp_u64(void) {
+static inline uint64 get_tx_timestamp_u64(void) {
     uint8 ts_tab[5]; uint64 ts = 0;
     dwt_readtxtimestamp(ts_tab);
     for (int i = 4; i >= 0; i--) {
@@ -139,7 +139,7 @@ static uint64 get_tx_timestamp_u64(void) {
     return ts;
 }
 
-static uint64 get_rx_timestamp_u64(void) {
+static inline uint64 get_rx_timestamp_u64(void) {
     uint8 ts_tab[5]; uint64 ts = 0;
     dwt_readrxtimestamp(ts_tab);
     for (int i = 4; i >= 0; i--) {
@@ -148,7 +148,7 @@ static uint64 get_rx_timestamp_u64(void) {
     return ts;
 }
 
-static void final_msg_set_ts(uint8 *ts_field, uint64 ts) {
+static inline void final_msg_set_ts(uint8 *ts_field, uint64 ts) {
     for (int i = 0; i < FINAL_MSG_TS_LEN; i++) {
         ts_field[i] = (uint8) ts;
         ts >>= 8;
@@ -160,21 +160,24 @@ static void final_msg_set_ts(uint8 *ts_field, uint64 ts) {
 ////////////////////////////////////////////////////////////////////////////////
 
 int dw_main(void) {
-    // display device information
+    // Print application header
     printk("\n");
     printk(APP_LINE);
     printk(APP_HEADER);
     printk("Device Type: ");
     printk(DEV_TYPE);
 
+    // initialize the DW1000 device
     openspi(); reset_DW1000();
     port_set_dw1000_slowrate();
     if (dwt_initialise(DWT_LOADUCODE) == DWT_ERROR) {
-        printk("err - init failed");
+        printk("<dev> Initialization failed");
         k_sleep(K_MSEC(500));
-        while (1) { };
+        while (1) {};
     }
     port_set_dw1000_fastrate();
+
+    // configure the DW1000 device
     dwt_configure(&config);
     dwt_setrxantennadelay(RX_ANT_DLY);
     dwt_settxantennadelay(TX_ANT_DLY);
@@ -182,6 +185,7 @@ int dw_main(void) {
     dwt_setrxtimeout(RESP_RX_TIMEOUT_UUS);
     dwt_setleds(1);
 
+    // set the device EUI-64 address
     dwt_seteui(eui_64);
     printk("Tag EUI-64: 0x");
     for (int i = 0; i < 8; i++) {
@@ -198,13 +202,13 @@ int dw_main(void) {
 
         if((RNGST == RNGST_POLL_0) | (RNGST == RNGST_POLL_1)) {
             tag_poll_msg[ALL_MSG_SN_IDX] = frame_seq_nb;
-            // if(RNGST == RNGST_POLL_0){
-            //     tag_poll_msg[5] = DEVCTRL_ANCHOR1_ADDR & 0xFF; // Set Anchor 1 Address
-            //     tag_poll_msg[6] = (DEVCTRL_ANCHOR1_ADDR >> 8) & 0xFF; // Set Anchor 1 Address
-            // } else {
-            //     tag_poll_msg[5] = DEVCTRL_ANCHOR2_ADDR & 0xFF; // Set Anchor 2 Address
-            //     tag_poll_msg[6] = (DEVCTRL_ANCHOR2_ADDR >> 8) & 0xFF; // Set Anchor 2 Address
-            // }
+            if(RNGST == RNGST_POLL_0){
+                tag_poll_msg[5] = DEVCTRL_ANCHOR1_ADDR & 0xFF; // Set Anchor 1 Address
+                tag_poll_msg[6] = (DEVCTRL_ANCHOR1_ADDR >> 8) & 0xFF; // Set Anchor 1 Address
+            } else {
+                tag_poll_msg[5] = DEVCTRL_ANCHOR2_ADDR & 0xFF; // Set Anchor 2 Address
+                tag_poll_msg[6] = (DEVCTRL_ANCHOR2_ADDR >> 8) & 0xFF; // Set Anchor 2 Address
+            }
             tag_poll_msg[5] = DEVCTRL_ANCHOR1_ADDR & 0xFF; // Set Anchor 1 Address
             tag_poll_msg[6] = (DEVCTRL_ANCHOR1_ADDR >> 8) & 0xFF; // Set Anchor 1 Address
 
@@ -217,8 +221,8 @@ int dw_main(void) {
             dwt_writetxfctrl(sizeof(tag_poll_msg), 0, 1);
             dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
 
-            // if(RNGST == RNGST_POLL_0) RNGST = RNGST_RESP_0;
-            // else RNGST = RNGST_RESP_1;
+            if(RNGST == RNGST_POLL_0) RNGST = RNGST_RESP_0;
+            else RNGST = RNGST_RESP_1;
 
             dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
@@ -252,7 +256,7 @@ int dw_main(void) {
                 for(int i = 0; i < frame_len; i++) {
                     printk("%02X ", rx_buffer[i]);
                 } printk("\n");
-                
+
                 printk(" - Sequence Number: %d\n", frame_seq_nb);
                 printk(" - Destination Address: 0x%04X\n", mhr_dstadr);
                 printk(" - Source Address: 0x%04X\n", mhr_srcadr);
@@ -297,7 +301,7 @@ int dw_main(void) {
         //         for(int i = 0; i < frame_len; i++) {
         //             printk("%02X ", rx_buffer[i]);
         //         } printk("\n");
-                
+
         //         printk(" - Sequence Number: %d\n", frame_seq_nb);
         //         printk(" - Destination Address: 0x%04X\n", mhr_dstadr);
         //         printk(" - Source Address: 0x%04X\n", mhr_srcadr);
@@ -355,7 +359,7 @@ int dw_main(void) {
 
         //         RNGST = (RNGST == RNGST_RESP_0) ? RNGST_POLL_1 : RNGST_POLL_0;
 
-        // } 
+        // }
             else {
                 dwt_write32bitreg(SYS_STATUS_ID,
                     SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR);

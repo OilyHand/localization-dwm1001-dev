@@ -18,6 +18,33 @@ LOG_MODULE_REGISTER(main);
 #define DEV_TYPE    "Anchor\n"
 #define APP_LINE    "===============================\n"
 
+
+/**
+ * Definitions for Time of Flight (ToF) calculations and ranging parameters.
+ */
+
+// Default antenna delay values for 64 MHz PRF
+#define TX_ANT_DLY 16436
+#define RX_ANT_DLY 16436
+
+// UWB microsecond (uus) to device time unit (dtu, around 15.65 ps)
+// 1 uus = 512 / 499.2 usec and 1 usec = 499.2 * 128 dtu.
+#define UUS_TO_DWT_TIME 65536
+
+// Delay definitions
+#define POLL_RX_TO_RESP_TX_DLY_UUS 6000
+#define RESP_TX_TO_FINAL_RX_DLY_UUS 500
+#define FINAL_RX_TIMEOUT_UUS 65000 // final message receive timeout
+#define PRE_TIMEOUT 30 // preamble timeout
+
+// Speed of light in air (in mm/us)
+#define SPEED_OF_LIGHT 299702547
+
+// Data types for timestamps (need 40 bits)
+typedef signed long long   int64;
+typedef unsigned long long uint64;
+
+
 // Default communication configuration
 dwt_config_t config = {
     5,               // Channel number
@@ -29,39 +56,33 @@ dwt_config_t config = {
     1,               // SFD Timeout
     DWT_BR_6M8,      // Data Rate
     DWT_PHRMODE_STD, // PHR Mode
-    129              // SFD timeout (preamble length + 1 + SFD length - PAC size).
+    129              // SFD timeout
+                     //(preamble length + 1 + SFD length - PAC size).
 };
 
-// Default antenna delay values for 64 MHz PRF
-#define TX_ANT_DLY 16436
-#define RX_ANT_DLY 16436
-
-// Length of the common part of the message
-#define ALL_MSG_COMMON_LEN 10
-#define ALL_MSG_SN_IDX 2
-#define POLL_DEVICE_ID_IDX 3
-#define FINAL_MSG_POLL_TX_TS_IDX 10
-#define FINAL_MSG_RESP_RX_TS_IDX 14
-#define FINAL_MSG_FINAL_TX_TS_IDX 18
-#define FINAL_MSG_TS_LEN 4
-
-////////////////////////////////////////////////////////////////////////////////
-// RANGING STATES                                                             //
-////////////////////////////////////////////////////////////////////////////////
-#define RNGST_POLL 0
-#define RNGST_FINL 1
-#define RNGST_REPO 2
-#define MHR_FC_DAT 0x8841
-
-////////////////////////////////////////////////////////////////////////////////
-// DEVICE INFORMATION                                                         //
-////////////////////////////////////////////////////////////////////////////////
+// Device IDs (Used for skipping discovery phase)
 #define DEVICE_TAG_ID 0xAA01
+#ifdef DEVICE_ANCHOR_01
 #define DEVICE_ANC_ID 0xBB01
+#elif DEVICE_ANCHOR_02
+#define DEVICE_ANC_ID 0xBB02
+#elif DEVICE_ANCHOR_03
+#define DEVICE_ANC_ID 0xBB03
+#elif DEVICE_ANCHOR_04
+#define DEVICE_ANC_ID 0xBB04
+#else
+#define DEVICE_ANC_ID 0xBB01 // Default ID
+#endif
 
-////////////////////////////////////////////////////////////////////////////////
-// RANGING MESSAGES                                                           //
-////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Definitions for MAC frame
+ */
+
+// MAC Header Frame Control
+#define MHR_FC_TYPE_DATA 0x8841
+
+// Message types
 #define MSG_TYPE_POLL 0x61
 #define MSG_TYPE_RESP 0x50
 #define MSG_TYPE_FINL 0x69
@@ -82,8 +103,25 @@ dwt_config_t config = {
 #define FRAME_MSG_FINAL_LEN 18
 #define FRAME_MSG_REPORT_LEN 14
 
+// Length of the common part of the message
+#define ALL_MSG_COMMON_LEN 10
+#define ALL_MSG_SN_IDX 2
+#define POLL_DEVICE_ID_IDX 3
+#define FINAL_MSG_POLL_TX_TS_IDX 10
+#define FINAL_MSG_RESP_RX_TS_IDX 14
+#define FINAL_MSG_FINAL_TX_TS_IDX 18
+#define FINAL_MSG_TS_LEN 4
+
+
+#define RNGST_POLL 0x00
+#define RNGST_FINAL 0x01
+
+/**
+ * Ranging Message Frames
+ */
+
 static uint8 anchor_resp_msg[] = {
-// Data Frame MAC Header
+/* Data Frame MAC Header */
     // Frame Control
     0x41, 0x8C,
     // Sequence Number (SN)
@@ -93,38 +131,34 @@ static uint8 anchor_resp_msg[] = {
     // Dest. Address (Tag Short Address)
     0x01, 0xAA,
     // Source Address
-    0x01, 0xBB,
-// Data Frame MAC Payload
+    0x00, 0xBB,
+/* Data Frame MAC Payload */
     // Function Code (0x50 for resp msg)
     0x50,
     // For FCS
     0x00,0x00
 };
 
-static uint8 anchor_report_msg[] = {
-// Data Frame MAC Header
-    // Frame Control
-    0x41, 0x8C,
-    // Sequence Number (SN)
-    0x00,
-    // PAN ID
-    0xCA, 0xDE,
-    // Dest. Address (Tag Short Address)
-    0x01, 0xAA,
-    // Source Address
-    0x01, 0xBB,
-// Data Frame MAC Payload
-    // Function Code
-    0x51,
-    // Calculated Time-of-Flight (ToF)
-    0x00, 0x00, 0x00, 0x00,
-    // For FCS
-    0x00, 0x00
-};
-
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
+// static uint8 anchor_report_msg[] = {
+// /* Data Frame MAC Header */
+//     // Frame Control
+//     0x41, 0x8C,
+//     // Sequence Number (SN)
+//     0x00,
+//     // PAN ID
+//     0xCA, 0xDE,
+//     // Dest. Address (Tag Short Address)
+//     0x01, 0xAA,
+//     // Source Address
+//     0x00, 0xBB,
+// /* Data Frame MAC Payload */
+//     // Function Code (0x51 for report msg)
+//     0x51,
+//     // Calculated Time-of-Flight (ToF)
+//     0x00, 0x00, 0x00, 0x00,
+//     // For FCS
+//     0x00, 0x00
+// };
 
 // Frame sequence number
 static uint8 frame_seq_nb = 0;
@@ -135,34 +169,18 @@ static uint8 frame_seq_nb_rx = 0;
 static uint8 rx_buffer[RX_BUF_LEN];
 static uint32 status_reg = 0;
 
-// UWB microsecond (uus) to device time unit (dtu, around 15.65 ps)
-// 1 uus = 512 / 499.2 usec and 1 usec = 499.2 * 128 dtu.
-#define UUS_TO_DWT_TIME 65536
-
-// Delay definitions
-#define POLL_RX_TO_RESP_TX_DLY_UUS 6000
-#define RESP_TX_TO_FINAL_RX_DLY_UUS 500
-#define FINAL_RX_TIMEOUT_UUS 65000 // final message receive timeout
-#define PRE_TIMEOUT 30 // preamble timeout
-
-// Data types for timestamps (need 40 bits)
-typedef signed long long   int64;
-typedef unsigned long long uint64;
-
 // timestamp variables for ds_twr_resp device
 static uint64 poll_rx_ts;
 static uint64 resp_tx_ts;
 static uint64 final_rx_ts;
-
-// Speed of light in air (in mm/us)
-#define SPEED_OF_LIGHT 299702547
 
 // distance calculation variables
 static double tof;
 static double distance;
 char dist_str[16] = {0}; // for displaying distance in console
 
-static uint64 get_tx_timestamp_u64(void) {
+
+static inline uint64 get_tx_timestamp_u64(void) {
     uint8 ts_tab[5];
     uint64 ts = 0;
     dwt_readtxtimestamp(ts_tab);
@@ -172,7 +190,7 @@ static uint64 get_tx_timestamp_u64(void) {
     return ts;
 }
 
-static uint64 get_rx_timestamp_u64(void) {
+static inline uint64 get_rx_timestamp_u64(void) {
     uint8 ts_tab[5];
     uint64 ts = 0;
     dwt_readrxtimestamp(ts_tab);
@@ -182,15 +200,13 @@ static uint64 get_rx_timestamp_u64(void) {
     return ts;
 }
 
-static void final_msg_get_ts(const uint8 * ts_field, uint32 * ts) {
+static inline void final_msg_get_ts(const uint8 * ts_field, uint32 * ts) {
     *ts = 0;
     for (int i = 0; i < FINAL_MSG_TS_LEN; i++) {
         *ts += ts_field[i] << (i * 8);
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
 // Main application entry point
@@ -228,7 +244,8 @@ int dw_main(void) {
     uint8_t ble_buf[120] = {0};
     ble_reps = (ble_reps_t *)(&ble_buf[0]);
 
-    uint8 RNGST = RNGST_POLL;
+    // Initialize ranging state
+    uint8 ranging_state = RNGST_POLL;
 
     k_yield();
 
@@ -236,8 +253,8 @@ int dw_main(void) {
         k_yield();
         dwt_setrxtimeout(0);
         dwt_rxenable(DWT_START_RX_IMMEDIATE);
-        printk("<ranging> State: 0x%02X (POLL: 0x00, FINAL: 0x01)\n", RNGST);
 
+        // Wait for POLL message
         while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) &
             (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR)))
         { };
@@ -249,14 +266,20 @@ int dw_main(void) {
             frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFL_MASK_1023;
             if (frame_len <= RX_BUF_LEN) {
                 dwt_readrxdata(rx_buffer, frame_len, 0);
+#ifdef DEBUG
+                printk("<ranging> Received frame: ");
+                for(int i = 0; i < frame_len; i++) {
+                    printk("%02X ", rx_buffer[i]);
+                } printk("\n");
+#endif
             }
 
             dwt_forcetrxoff();
             dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
-            // Frame Control Check
+            // FC Check
             uint16 mhr_fc = rx_buffer[0] | (rx_buffer[1] << 8);
-            if(mhr_fc != MHR_FC_DAT) {
+            if(mhr_fc != MHR_FC_TYPE_DATA) {
                 printk("<ranging> Invalid Frame Control\n");
                 continue;
             }
@@ -266,42 +289,44 @@ int dw_main(void) {
             uint16 mhr_srcadr = rx_buffer[7] | (rx_buffer[8] << 8);
             uint16 func_code = rx_buffer[9];
 
+#ifdef DEBUG
             printk("------------------------------------------------------------\n");
             printk("Received Frame: ");
-            for(int i = 0; i < frame_len; i++) {
-                printk("%02X ", rx_buffer[i]);
-            } printk("\n");
-            
+            for(int i = 0; i < frame_len; i++) printk("%02X ", rx_buffer[i]);
+            printk("\n");
             printk(" - Sequence Number: %d\n", frame_seq_nb);
             printk(" - Destination Address: 0x%04X\n", mhr_dstadr);
             printk(" - Source Address: 0x%04X\n", mhr_srcadr);
             printk(" - Function Code: 0x%02X\n", func_code);
-
             printk("------------------------------------------------------------\n");
+#endif
 
-
-            if((mhr_dstadr != DEVICE_ANC_ID) | (mhr_srcadr != DEVICE_TAG_ID)) {
-                printk("<ranging> Invalid destination or source address\n");
+            if(mhr_dstadr != DEVICE_ANC_ID) {
+            #ifdef DEBUG
+                printk("<ranging> ADDR mismatch\n");
+            #endif
                 continue;
             }
 
-            if(RNGST == RNGST_POLL){
+            if (ranging_state == RNGST_POLL) {
                 if(func_code != MSG_TYPE_POLL) {
-                    RNGST = RNGST_POLL;
+                    printk("<ranging> not a POLL frame\n");
                     continue;
                 }
 
+                anchor_resp_msg[ALL_MSG_SN_IDX] = frame_seq_nb;
+
+            #ifdef DEBUG
                 printk("<ranging> Received POLL: ");
                 for(int i = 0; i < frame_len; i++) {
                     printk("%02X ", rx_buffer[i]);
                 } printk("\n");
 
-                anchor_resp_msg[ALL_MSG_SN_IDX] = frame_seq_nb;
-
                 printk("<ranging> Sended RESP: ");
                 for(int i=0; i < sizeof(anchor_resp_msg); i++) {
                     printk("%02X ", anchor_resp_msg[i]);
                 } printk("\n");
+            #endif
 
                 poll_rx_ts = get_rx_timestamp_u64();
                 uint32 resp_tx_time = (poll_rx_ts + (POLL_RX_TO_RESP_TX_DLY_UUS * UUS_TO_DWT_TIME)) >> 8;
@@ -317,16 +342,19 @@ int dw_main(void) {
                     continue;
                 }
 
-                RNGST = RNGST_FINL;
-            } else if(RNGST == RNGST_FINL) {
+                ranging_state = RNGST_FINAL;
+                printk("<ranging> RESP sent, waiting for FINAL\n");
+            } else if (ranging_state == RNGST_FINAL){
+                // FINAL MESSAGE RECEIVE
                 if(func_code != MSG_TYPE_FINL){
-                    RNGST = RNGST_POLL;
                     continue;
                 }
+            #ifdef DEBUG
                 printk("<ranging> Received FINAL: ");
                 for(int i = 0; i < frame_len; i++) {
                     printk("%02X ", rx_buffer[i]);
                 } printk("\n");
+            #endif
 
                 uint32 poll_tx_ts, resp_rx_ts, final_tx_ts;
                 final_msg_get_ts(&rx_buffer[FINAL_MSG_POLL_TX_TS_IDX], &poll_tx_ts);
@@ -363,12 +391,12 @@ int dw_main(void) {
                 k_yield();
 
                 frame_seq_nb_rx = frame_seq_nb + 1;
-                RNGST = RNGST_POLL;
-            } else {
-                dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR);
-                dwt_rxreset();
-                RNGST = RNGST_POLL;
             }
+        } else {
+            dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR);
+            dwt_rxreset();
+            printk("<ranging> RX Error\n");
+            continue;
         }
     }
     return 0;
