@@ -180,6 +180,17 @@ static inline void display_status_reg(uint32 status_reg){
     if(status_reg & SYS_STATUS_ICRBP) printk(" - IC Side Receive Buffer Pointer\n");
 }
 
+static void device_init(void){
+    openspi(); reset_DW1000();
+    port_set_dw1000_slowrate();
+    if (dwt_initialise(DWT_LOADUCODE) == DWT_ERROR) {
+        printk("<dev> Initialization failed");
+        k_sleep(K_MSEC(500));
+        while (1) {};
+    }
+    port_set_dw1000_fastrate();
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -193,14 +204,7 @@ int dw_main(void) {
     printk(DEV_TYPE);
 
     // initialize the DW1000 device
-    openspi(); reset_DW1000();
-    port_set_dw1000_slowrate();
-    if (dwt_initialise(DWT_LOADUCODE) == DWT_ERROR) {
-        printk("<dev> Initialization failed");
-        k_sleep(K_MSEC(500));
-        while (1) {};
-    }
-    port_set_dw1000_fastrate();
+    device_init();
 
     // configure the DW1000 device
     dwt_configure(&config);
@@ -222,121 +226,122 @@ int dw_main(void) {
     printk("\n");
     printk(APP_LINE);
 
-    uint8 num_anchors = DEVCTRL_NUM_ANCHORS;
-    uint8 anchor_addresses[DEVCTRL_NUM_ANCHORS][2] = {
-        DEVCTRL_ANCHOR1_ADDR & 0xFF, (DEVCTRL_ANCHOR1_ADDR >> 8) & 0xFF,
-        DEVCTRL_ANCHOR2_ADDR & 0xFF, (DEVCTRL_ANCHOR2_ADDR >> 8) & 0xFF,
-        DEVCTRL_ANCHOR3_ADDR & 0xFF, (DEVCTRL_ANCHOR3_ADDR >> 8) & 0xFF,
-        DEVCTRL_ANCHOR4_ADDR & 0xFF, (DEVCTRL_ANCHOR4_ADDR >> 8) & 0xFF
-    };
+    // uint8 num_anchors = DEVCTRL_NUM_ANCHORS;
+    uint8 anchor_addresses[DEVCTRL_NUM_ANCHORS][2];
+    uint8 target_anchor = 0;
 
-    uint8 current_anchor = 0;
+    anchor_addresses [0][0] = DEVCTRL_ANCHOR1_ADDR & 0xFF;
+    anchor_addresses [0][1] = (DEVCTRL_ANCHOR1_ADDR >> 8) & 0xFF;
+    anchor_addresses [1][0] = DEVCTRL_ANCHOR2_ADDR & 0xFF;
+    anchor_addresses [1][1] = (DEVCTRL_ANCHOR2_ADDR >> 8) & 0xFF;
+    anchor_addresses [2][0] = DEVCTRL_ANCHOR3_ADDR & 0xFF;
+    anchor_addresses [2][1] = (DEVCTRL_ANCHOR3_ADDR >> 8) & 0xFF;
+    anchor_addresses [3][0] = DEVCTRL_ANCHOR4_ADDR & 0xFF;
+    anchor_addresses [3][1] = (DEVCTRL_ANCHOR4_ADDR >> 8) & 0xFF;
 
     while (1) {
-        // configure poll message fields
-        // sequence number
-        tag_poll_msg[2] = frame_seq_nb; 
-        // destination address
-        tag_poll_msg[5] = anchor_addresses[current_anchor][0];
-        tag_poll_msg[6] = anchor_addresses[current_anchor][1];
+        // Configure POLL message
+        tag_poll_msg[2] = frame_seq_nb; // sequence number
+        tag_poll_msg[5] = anchor_addresses[target_anchor][0]; 
+        tag_poll_msg[6] = anchor_addresses[target_anchor][1]; // destination address
 
-        printk("<ranging> Sended POLL: ");
+        // Displaying POLL message
+        printk("------------------------------------------------------------\n");
+        printk("<ranging> Send POLL: ");
         for(int i = 0; i < sizeof(tag_poll_msg); i++)
             printk("%02X ", tag_poll_msg[i]);
         printk("\n");
         
+        // Transmit POLL message
         dwt_writetxdata(sizeof(tag_poll_msg), tag_poll_msg, 0);
         dwt_writetxfctrl(sizeof(tag_poll_msg), 0, 1);
-        int rc = dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED);
-        printk("<ranging> TX POLL returned: %d\n", rc);
-
-        // Wait for the response from the anchor
-        while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID)) &
-            (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR))) {
-                printk("<ranging> SYS_STATUS: %08lX\n", status_reg);
-                display_status_reg(status_reg);
-                reset_DW1000();
-                k_sleep(K_MSEC(1000));
-            };
-        printk("<ranging> SYS_STATUS: %08lX\n", status_reg);
-        display_status_reg(status_reg);
+        if(dwt_starttx(DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED)){
+            printk("<ranging> ERROR: POLL transmission failed\n");
+            k_sleep(K_MSEC(1));
+            continue;
+        }
+        
+        // Listen anchor's RESP message
+        while (
+            !((status_reg = dwt_read32bitreg(SYS_STATUS_ID))
+              & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR))
+        ){
+            printk("------------------------------------------------------------\n");
+            printk("<ranging> ERROR: RESP reception failed\n");
+            printk("  - SYS_STATUS: %08lX\n", status_reg);
+            dwt_forcetrxoff();
+            dwt_rxenable(DWT_START_RX_IMMEDIATE);
+            k_sleep(K_MSEC(500));
+        };
 
         if (status_reg & SYS_STATUS_RXFCG) {
             uint32 frame_len = dwt_read32bitreg(RX_FINFO_ID)
                                 & RX_FINFO_RXFLEN_MASK;
             if (frame_len <= RX_BUF_LEN) {
                 dwt_readrxdata(rx_buffer, frame_len, 0);
-                printk("Received frame length: %ld\n", frame_len);
             }
-
-            printk("Received RESP: ");
-            for(int i = 0; i < frame_len; i++)
-                printk("%02X ", rx_buffer[i]);
-            printk("\n");
 
             // validate frame
             frame_seq_nb_rx = rx_buffer[ALL_MSG_SN_IDX];
             uint16 mhr_dstadr = rx_buffer[5] | (rx_buffer[6] << 8);
             uint16 mhr_srcadr = rx_buffer[7] | (rx_buffer[8] << 8);
             uint16 func_code = rx_buffer[9];
-
             printk("------------------------------------------------------------\n");
-            printk("Received Frame: ");
+            printk("<ranging> Received Frame: ");
             for(int i = 0; i < frame_len; i++) printk("%02X ", rx_buffer[i]);
             printk("\n");
-            printk(" - Sequence Number: %d\n", frame_seq_nb);
-            printk(" - Destination Address: 0x%04X\n", mhr_dstadr);
-            printk(" - Source Address: 0x%04X\n", mhr_srcadr);
-            printk(" - Function Code: 0x%02X\n", func_code);
-            printk("------------------------------------------------------------\n");
+            printk("    - Sequence Number: %d\n", frame_seq_nb_rx);
+            printk("    - Destination Address: 0x%04X\n", mhr_dstadr);
+            printk("    - Source Address: 0x%04X\n", mhr_srcadr);
+            printk("    - Function Code: 0x%02X\n", func_code);
 
             // compute timestamp
             uint32 final_tx_time;
             int ret;
             poll_tx_ts = get_tx_timestamp_u64();
-            resp_rx_ts = get_rx_timestamp_u64();
-            final_tx_time = (resp_rx_ts +
-                (RESP_RX_TO_FINAL_TX_DLY_UUS * UUS_TO_DWT_TIME)) >> 8;
-
-            dwt_setdelayedtrxtime(final_tx_time);
-            final_tx_ts = (((uint64)(final_tx_time & 0xFFFFFFFEUL)) << 8) + TX_ANT_DLY;
-
-            final_msg_set_ts(&tag_final_msg[FINAL_MSG_POLL_TX_TS_IDX], poll_tx_ts);
-            final_msg_set_ts(&tag_final_msg[FINAL_MSG_RESP_RX_TS_IDX], resp_rx_ts);
-            final_msg_set_ts(&tag_final_msg[FINAL_MSG_FINAL_TX_TS_IDX], final_tx_ts);
             
-            tag_final_msg[2] = frame_seq_nb;
-            tag_final_msg[5] = anchor_addresses[current_anchor][0]; // Set Anchor Address
-            tag_final_msg[6] = anchor_addresses[current_anchor][1]; // Set Anchor Address
+            while(1){
+                resp_rx_ts = get_rx_timestamp_u64();
+                final_tx_time = (resp_rx_ts +
+                    (RESP_RX_TO_FINAL_TX_DLY_UUS * UUS_TO_DWT_TIME)) >> 8;
 
-            printk("<ranging> Sended FINAL: ");
-            for(int i = 0; i < frame_len; i++) printk("%02X ", tag_final_msg[i]);
-            printk("\n");
+                dwt_setdelayedtrxtime(final_tx_time);
+                final_tx_ts = (((uint64)(final_tx_time & 0xFFFFFFFEUL)) << 8) + TX_ANT_DLY;
 
-            // Sending the final message
-            dwt_writetxdata(sizeof(tag_final_msg), tag_final_msg, 0);
-            dwt_writetxfctrl(sizeof(tag_final_msg), 0, 1);
+                final_msg_set_ts(&tag_final_msg[FINAL_MSG_POLL_TX_TS_IDX], poll_tx_ts);
+                final_msg_set_ts(&tag_final_msg[FINAL_MSG_RESP_RX_TS_IDX], resp_rx_ts);
+                final_msg_set_ts(&tag_final_msg[FINAL_MSG_FINAL_TX_TS_IDX], final_tx_ts);
+                
+                tag_final_msg[2] = frame_seq_nb;
+                tag_final_msg[5] = anchor_addresses[target_anchor][0]; // Set Anchor Address
+                tag_final_msg[6] = anchor_addresses[target_anchor][1]; // Set Anchor Address
 
-            ret = dwt_starttx(DWT_START_TX_DELAYED);
-            if (ret == DWT_SUCCESS) {
-                while (!(dwt_read32bitreg(SYS_STATUS_ID)
-                        & SYS_STATUS_TXFRS)) {};
-                dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
-                printk("<ranging> TX FINAL successful\n");
-                frame_seq_nb++;
-                // current_anchor = (current_anchor + 1) % num_anchors; // Move to next anchor
-            } else {
-                printk("TX FINAL failed: ");
-                uint32 sys_status = dwt_read32bitreg(SYS_STATUS_ID);
-                uint32 sys_state  = dwt_read32bitreg(SYS_STATE_ID);
-                printk("SYS_STATUS: %08lX, SYS_STATE: %08lX\n", sys_status, sys_state);
+                // printk("------------------------------------------------------------\n");
+                // printk("<ranging> Sended FINAL: ");
+                // for(int i = 0; i < frame_len; i++) printk("%02X ", tag_final_msg[i]);
+                // printk("\n");
+
+                // Sending the final message
+                dwt_writetxdata(sizeof(tag_final_msg), tag_final_msg, 0);
+                dwt_writetxfctrl(sizeof(tag_final_msg), 0, 1);
+
+                ret = dwt_starttx(DWT_START_TX_DELAYED);
+                if (ret == DWT_SUCCESS) {
+                    while (!(dwt_read32bitreg(SYS_STATUS_ID)& SYS_STATUS_TXFRS)) {};
+                    dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS);
+                    printk("<ranging> TX FINAL successful\n");
+                    frame_seq_nb++;
+                    break;
+                    // target_anchor = (target_anchor + 1) % DEVCTRL_NUM_ANCHORS; // Move to next anchor
+                }
             }
 
         } else {
             dwt_write32bitreg(SYS_STATUS_ID,
                 SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR);
-            printk("<ranging> RX timeout or error, resetting RX\n");
+            printk("<ranging> RESP reception failed\n");
         }
+
         printk("<ranging> Waiting for next poll...\n");
         k_sleep(K_MSEC(RNG_DELAY_MS));
     }
