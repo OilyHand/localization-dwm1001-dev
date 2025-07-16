@@ -14,12 +14,7 @@ extern int dw_main(void);
 
 void bluetooth_thread(void * id, void * unused1, void * unused2)
 {
-    printk("START: %s\n", __func__);
-
-    // k_sleep(K_MSEC(500));
-
 	ble_device_init();
-
 	while(1) {/* spin */}
 }
 
@@ -28,9 +23,7 @@ K_THREAD_DEFINE(bluetooth_id, STACKSIZE, bluetooth_thread,
 
 void main_thread(void * id, void * unused1, void * unused2)
 {
-    printk("START: %s\n", __func__);
 	dw_main();
-
 	while(1) {/* spin */}
 }
 

@@ -112,11 +112,9 @@ static void bt_ready(int err)
 {
     printk("<ble> ");
     if (err) {
-        printk("Bluetooth initialization failed: %d\n", err);
+        LOG_ERR("Bluetooth initialization failed: %d", err);
         return;
     }
-
-    printk("Bluetooth initialized OK\n");
 }
 
 /*---------------------------------------------------------------------------*/
@@ -132,18 +130,15 @@ int ble_start_advertising(void)
     scan->data_len = DeviceIdLen;
     scan->data     = DeviceId;
 
-    printk("<ble> ");
-
     err = bt_le_adv_start(BT_LE_ADV_CONN,
                           advert, ARRAY_SIZE(advert),
                           scan,   ARRAY_SIZE(scan));
 
     if (err) {
-        printk("Start advertising failed: %d\n", err);
+        LOG_ERR("Start advertising failed: %d", err);
         return err;
     }
 
-    printk("Start advertising OK\n");
     return 0;
 }
 
@@ -158,11 +153,10 @@ int ble_stop_advertising(void)
 
     err = bt_le_adv_stop();
     if (err) {
-        printk("Stop advertising failed: %d\n", err);
+        LOG_ERR("Stop advertising failed: %d", err);
         return err;
     }
 
-    printk("Stop advertising OK\n");
     return 0;
 }
 
@@ -175,7 +169,7 @@ static void auth_cancel(struct bt_conn *conn)
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-    printk("<ble> Pairing cancelled: %s\n", addr);
+    LOG_INF("Pairing cancelled: %s", addr);
 }
 
 static struct bt_conn_auth_cb  auth_cb_display = {
@@ -207,7 +201,7 @@ int ble_base_init(void)
 
     err = bt_enable(bt_ready);
     if (err) {
-        printk("<ble> Bluetooth initialization failed: %d\n", err);
+        LOG_ERR("Initialization failed: %d", err);
         return err;
     }
 

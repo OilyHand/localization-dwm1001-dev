@@ -200,7 +200,6 @@
      {
          return DWT_ERROR ;
      }
-     printk("device_id: %08x\n", device_id);
 
      if(!(DWT_DW_WAKE_UP & config)) // Don't reset the device if DWT_DW_WAKE_UP bit is set, e.g. when calling this API after wake up
      {

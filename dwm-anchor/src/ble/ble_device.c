@@ -146,10 +146,9 @@ void ble_device_name(void)
     uint32_t deviceid = NRF_FICR->DEVICEID[0];
 
     sprintf(DeviceId, "%s_%08x", CONFIG_BT_DEVICE_NAME, deviceid);
-
     DeviceIdLen = strlen(DeviceId);
 
-    printk("<ble> Device ID: %s\n", DeviceId);
+    LOG_INF("Device ID: %s\n", DeviceId);
 
 }
 
