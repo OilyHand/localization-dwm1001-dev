@@ -10,6 +10,7 @@
 
 extern int dw_main(void);
 
+#ifdef BLE_ENABLE
 #include "ble_device.h"
 
 void bluetooth_thread(void * id, void * unused1, void * unused2)
@@ -20,6 +21,7 @@ void bluetooth_thread(void * id, void * unused1, void * unused2)
 
 K_THREAD_DEFINE(bluetooth_id, STACKSIZE, bluetooth_thread,
                 NULL, NULL, NULL, PRIORITY_BLE, 0, 0);
+#endif
 
 void main_thread(void * id, void * unused1, void * unused2)
 {

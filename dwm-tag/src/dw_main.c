@@ -42,7 +42,7 @@ uint8 eui_64[8] = {0xDE, 0xCA, 0x01, 0x02, 0x03, 0x04, 0xAB, 0xCD};
 #define RX_ANT_DLY 16436
 
 // Inter-ranging delay period, in milliseconds
-#define RNG_DELAY_MS 1000
+#define RNG_DELAY_MS 200
 
 // Device Informations
 #define DEVCTRL_NUM_ANCHORS 4
@@ -219,6 +219,13 @@ int dw_main(void) {
     while (1) {
         LOG_DBG(PART_LINE);
         LOG_DBG("Sending POLL message");
+
+        if(target_anchor == 0){
+            LOG_INF(PART_LINE);
+            LOG_INF("Sequence Number %02X", frame_seq_nb);
+            frame_seq_nb++;
+        }
+
         // Configure POLL message
         tag_poll_msg[2] = frame_seq_nb; // sequence number
         memcpy(&tag_poll_msg[5], &anchor_addresses[target_anchor], 2);
@@ -308,18 +315,15 @@ int dw_main(void) {
 
                 char dist_str[16];
                 snprintf(dist_str, 16, "%.4f", distance);
-                LOG_INF("Distance: %s, SEQ: %d", log_strdup(dist_str), frame_seq_nb);
+                LOG_INF("- Dev: %d, Distance: %s  ", target_anchor, log_strdup(dist_str));
 
                 ble_reps->cnt = 1;
                 ble_reps->ble_rep[0].seq_nb = frame_seq_nb;
-                ble_reps->ble_rep[0].node_id = 0;
+                ble_reps->ble_rep[0].node_id = target_anchor;
                 ble_reps->ble_rep[0].dist = distance;
                 ble_reps->ble_rep[0].tqf = 0;
-
                 dwm1001_notify((uint8_t*)ble_buf, 1 + sizeof(ble_rep_t) * ble_reps->cnt);
 
-                if(target_anchor == DEVCTRL_NUM_ANCHORS-1)
-                    frame_seq_nb++;
                 target_anchor = (target_anchor + 1) % DEVCTRL_NUM_ANCHORS; // Move to next anchor
 
             } else {
@@ -332,6 +336,9 @@ int dw_main(void) {
             dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR);
             dwt_rxreset();
         }
-        k_sleep(K_MSEC(RNG_DELAY_MS));
+        if(target_anchor == 0)
+            k_sleep(K_MSEC(RNG_DELAY_MS));
+        else 
+            k_sleep(K_MSEC(10));
     }
 }
