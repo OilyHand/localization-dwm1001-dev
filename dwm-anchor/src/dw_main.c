@@ -384,14 +384,6 @@ int dw_main(void) {
 
                 LOG_INF("Distance: %s, SEQ: %d", log_strdup(distance_str), frame_seq_nb);
 
-                ble_reps->cnt = 1;
-                ble_reps->ble_rep[0].seq_nb = frame_seq_nb;
-                ble_reps->ble_rep[0].node_id = DEVICE_ANC_ID;
-                ble_reps->ble_rep[0].dist = (float)distance;
-                ble_reps->ble_rep[0].tqf = 0;
-
-                dwm1001_notify((uint8_t*)ble_buf, 1 + sizeof(ble_rep_t) * ble_reps->cnt);
-
                 dwt_setrxtimeout(FINAL_RX_TIMEOUT_UUS);
                 anchor_report_msg[ALL_MSG_SN_IDX] = frame_seq_nb;
                 memcpy(&anchor_report_msg[10], &distance_f, sizeof(float));

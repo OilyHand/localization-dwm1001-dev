@@ -2,7 +2,8 @@
 #include <sys/printk.h>
 
 #define STACKSIZE 1024
-#define PRIORITY 99
+#define PRIORITY_MAIN 90
+#define PRIORITY_BLE 99
 #define DELAY_TIME   K_MSEC(1000)
 
 extern int dw_main(void);
@@ -27,4 +28,4 @@ void main_thread(void * id, void * unused1, void * unused2)
 }
 
 K_THREAD_DEFINE(main_id, STACKSIZE, main_thread,
-                NULL, NULL, NULL, PRIORITY, 0, 0);
+                NULL, NULL, NULL, PRIORITY_MAIN, 0, 0);

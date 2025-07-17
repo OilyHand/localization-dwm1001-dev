@@ -32,5 +32,7 @@ target_sources(app PRIVATE ../src/ble/ble_device.c)
 target_sources(app PRIVATE ../src/ble/ble_service.c)
 
 target_include_directories(app PRIVATE ../include/)
+target_include_directories(app PRIVATE ../include/ble/)
 target_include_directories(app PRIVATE ../src/)
 target_include_directories(app PRIVATE ../src/platform/)
+target_include_directories(app PRIVATE ../src/ble/)

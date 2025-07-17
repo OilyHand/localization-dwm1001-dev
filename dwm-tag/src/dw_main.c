@@ -209,6 +209,13 @@ int dw_main(void) {
 
     k_yield();
 
+    // Initialize BLE Buffer
+    ble_reps_t * ble_reps;
+    uint8_t ble_buf[120] = {0};
+    ble_reps = (ble_reps_t *)(&ble_buf[0]);
+
+    k_yield();
+
     while (1) {
         LOG_DBG(PART_LINE);
         LOG_DBG("Sending POLL message");
@@ -302,6 +309,14 @@ int dw_main(void) {
                 char dist_str[16];
                 snprintf(dist_str, 16, "%.4f", distance);
                 LOG_INF("Distance: %s, SEQ: %d", log_strdup(dist_str), frame_seq_nb);
+
+                ble_reps->cnt = 1;
+                ble_reps->ble_rep[0].seq_nb = frame_seq_nb;
+                ble_reps->ble_rep[0].node_id = 0;
+                ble_reps->ble_rep[0].dist = distance;
+                ble_reps->ble_rep[0].tqf = 0;
+
+                dwm1001_notify((uint8_t*)ble_buf, 1 + sizeof(ble_rep_t) * ble_reps->cnt);
 
                 if(target_anchor == DEVCTRL_NUM_ANCHORS-1)
                     frame_seq_nb++;
