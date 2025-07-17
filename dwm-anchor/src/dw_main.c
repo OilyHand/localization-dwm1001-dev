@@ -37,8 +37,8 @@ dwt_config_t config = {
 
 // Default antenna delay values for 64 MHz PRF
 //16436
-#define TX_ANT_DLY 16404
-#define RX_ANT_DLY 16404
+#define TX_ANT_DLY 16436
+#define RX_ANT_DLY 16436
 
 // UWB microsecond (uus) to device time unit (dtu, around 15.65 ps)
 #define UUS_TO_DWT_TIME 65536
@@ -131,26 +131,26 @@ static uint8 anchor_resp_msg[] = {
     0x00,0x00
 };
 
-// static uint8 anchor_report_msg[] = {
-// /* Data Frame MAC Header */
-//     // Frame Control
-//     0x41, 0x8C,
-//     // Sequence Number (SN)
-//     0x00,
-//     // PAN ID
-//     0xCA, 0xDE,
-//     // Dest. Address (Tag Short Address)
-//     0x01, 0xAA,
-//     // Sourete Address
-//     0x00, 0xBB,
-// /* Data Frame MAC Payload */
-//     // Function Code (0x51 for report msg)
-//     0x51,
-//     // Calculated Time-of-Flight (ToF)
-//     0x00, 0x00, 0x00, 0x00,
-//     // For FCS
-//     0x00, 0x00
-// };
+static uint8 anchor_report_msg[] = {
+/* Data Frame MAC Header */
+    // Frame Control
+    0x41, 0x8C,
+    // Sequence Number (SN)
+    0x00,
+    // PAN ID
+    0xCA, 0xDE,
+    // Dest. Address (Tag Short Address)
+    0x01, 0xAA,
+    // Sourete Address
+    0x01, 0xBB,
+/* Data Frame MAC Payload */
+    // Function Code (0x51 for report msg)
+    0x51,
+    // Calculated Time-of-Flight (ToF)
+    0x00, 0x00, 0x00, 0x00,
+    // For FCS
+    0x00, 0x00
+};
 
 // Frame sequence number
 static uint8 frame_seq_nb = 0;
@@ -160,7 +160,7 @@ static uint8 frame_seq_nb_rx = 0;
 #define RX_BUF_LEN 24
 static uint8 rx_buffer[RX_BUF_LEN];
 
-// Status register 
+// Status register
 static uint32 status_reg = 0;
 
 // timestamp variables for ds_twr_resp device
@@ -374,14 +374,15 @@ int dw_main(void) {
                 Db = (double)(resp_tx_ts_32 - poll_rx_ts_32);
 
                 tof_dtu = (int64)((Ra * Rb - Da * Db) / (Ra + Rb + Da + Db));
-                
+
                 tof = tof_dtu * DWT_TIME_UNITS;
                 distance = tof * SPEED_OF_LIGHT;
+                float distance_f = (float) distance;
 
                 char distance_str[16];
                 snprintf(distance_str, 16, "%.4f", distance);
 
-                LOG_INF(" Distance: %s [m]", log_strdup(distance_str));
+                LOG_INF("Distance: %s, SEQ: %d", log_strdup(distance_str), frame_seq_nb);
 
                 ble_reps->cnt = 1;
                 ble_reps->ble_rep[0].seq_nb = frame_seq_nb;
@@ -390,9 +391,23 @@ int dw_main(void) {
                 ble_reps->ble_rep[0].tqf = 0;
 
                 dwm1001_notify((uint8_t*)ble_buf, 1 + sizeof(ble_rep_t) * ble_reps->cnt);
+
+                dwt_setrxtimeout(FINAL_RX_TIMEOUT_UUS);
+                anchor_report_msg[ALL_MSG_SN_IDX] = frame_seq_nb;
+                memcpy(&anchor_report_msg[10], &distance_f, sizeof(float));
+
+                dwt_writetxdata(sizeof(anchor_report_msg), anchor_report_msg, 0);
+                dwt_writetxfctrl(sizeof(anchor_report_msg), 0, 1);
+
+                ret = dwt_starttx(DWT_START_TX_IMMEDIATE);
+
+                if (ret == DWT_ERROR){
+                    LOG_ERR(" *** Error starting transmission");
+                    continue;
+                }
+
                 k_yield();
 
-                frame_seq_nb_rx = frame_seq_nb + 1;
             } else {
                 LOG_ERR("  ** FINAL reception failed (timeout)");
                 dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR);

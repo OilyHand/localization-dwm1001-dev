@@ -7,12 +7,20 @@
 
 extern int dw_main(void);
 
+#include "ble_device.h"
+
+void bluetooth_thread(void * id, void * unused1, void * unused2)
+{
+	ble_device_init();
+	while(1) {/* spin */}
+}
+
+K_THREAD_DEFINE(bluetooth_id, STACKSIZE, bluetooth_thread,
+                NULL, NULL, NULL, PRIORITY_BLE, 0, 0);
+
 void main_thread(void * id, void * unused1, void * unused2)
 {
-    printk("%s\n", __func__);
-
     k_sleep( K_MSEC(1000));
-
 	dw_main();
 
 	while(1) { /* spin */}

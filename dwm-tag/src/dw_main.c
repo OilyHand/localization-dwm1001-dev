@@ -8,6 +8,8 @@
 #include "deca_spi.h"
 #include "port.h"
 
+#include "ble_device.h"
+
 #define LOG_LEVEL 3
 #include <logging/log.h>
 LOG_MODULE_REGISTER(main);
@@ -36,14 +38,14 @@ uint8 eui_64[8] = {0xDE, 0xCA, 0x01, 0x02, 0x03, 0x04, 0xAB, 0xCD};
 
 // Default antenna delay values for 64 MHz PRF
 //16436
-#define TX_ANT_DLY 16404
-#define RX_ANT_DLY 16404
+#define TX_ANT_DLY 16436
+#define RX_ANT_DLY 16436
 
 // Inter-ranging delay period, in milliseconds
 #define RNG_DELAY_MS 1000
 
 // Device Informations
-#define DEVCTRL_NUM_ANCHORS 4436
+#define DEVCTRL_NUM_ANCHORS 4
 #define DEVCTRL_ANCHOR1_ADDR 0xBB01
 #define DEVCTRL_ANCHOR2_ADDR 0xBB02
 #define DEVCTRL_ANCHOR3_ADDR 0xBB03
@@ -83,6 +85,10 @@ static uint64 resp_rx_ts;
 static uint64 final_tx_ts;
 
 typedef unsigned long long uint64;
+
+uint16 mhr_dstadr;
+uint16 mhr_srcadr;
+uint16 func_code;
 
 static uint8 tag_poll_msg[] = {
     // Frame Control
@@ -149,6 +155,8 @@ static inline void final_msg_set_ts(uint8 *ts_field, uint64 ts) {
     }
 }
 
+
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -174,10 +182,10 @@ int dw_main(void) {
     dwt_configure(&config);
     dwt_setrxantennadelay(RX_ANT_DLY);
     dwt_settxantennadelay(TX_ANT_DLY);
-    
+
     dwt_setrxaftertxdelay(POLL_TX_TO_RESP_RX_DLY_UUS);
     dwt_setrxtimeout(RESP_RX_TIMEOUT_UUS);
-    
+
     dwt_setleds(1);
 
     // set the device EUI-64 address
@@ -206,9 +214,8 @@ int dw_main(void) {
         LOG_DBG("Sending POLL message");
         // Configure POLL message
         tag_poll_msg[2] = frame_seq_nb; // sequence number
-        tag_poll_msg[5] = anchor_addresses[target_anchor][0]; 
-        tag_poll_msg[6] = anchor_addresses[target_anchor][1]; // destination address
-        
+        memcpy(&tag_poll_msg[5], &anchor_addresses[target_anchor], 2);
+
         // Transmit POLL message
         dwt_writetxdata(sizeof(tag_poll_msg), tag_poll_msg, 0);
         dwt_writetxfctrl(sizeof(tag_poll_msg), 0, 1);
@@ -216,7 +223,7 @@ int dw_main(void) {
             LOG_ERR("** ERROR: POLL transmission failed");
             continue;
         }
-        
+
         // Listen anchor's RESP message
         while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID))
               & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR)))
@@ -225,7 +232,7 @@ int dw_main(void) {
         if (status_reg & SYS_STATUS_RXFCG) {
             LOG_DBG(PART_LINE);
             LOG_DBG("Receiving RESP message");
-            
+
             uint32 frame_len;
             dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG | SYS_STATUS_TXFRB );
 
@@ -235,12 +242,12 @@ int dw_main(void) {
             }
 
             // validate frame
-            frame_seq_nb_rx = rx_buffer[ALL_MSG_SN_IDX];
-            uint16 mhr_dstadr = rx_buffer[5] | (rx_buffer[6] << 8);
-            uint16 mhr_srcadr = rx_buffer[7] | (rx_buffer[8] << 8);
-            uint16 func_code = rx_buffer[9];
+            frame_seq_nb_rx = rx_buffer[2];
+            memcpy(&mhr_dstadr, &rx_buffer[5], 2);
+            memcpy(&mhr_srcadr, &rx_buffer[7], 2);
+            func_code = rx_buffer[9];
 
-            LOG_DBG(PART_LINE); 
+            LOG_DBG(PART_LINE);
             LOG_DBG("Sending FINAL message");
 
             // compute timestamp
@@ -259,22 +266,51 @@ int dw_main(void) {
             final_msg_set_ts(&tag_final_msg[FINAL_MSG_POLL_TX_TS_IDX], poll_tx_ts);
             final_msg_set_ts(&tag_final_msg[FINAL_MSG_RESP_RX_TS_IDX], resp_rx_ts);
             final_msg_set_ts(&tag_final_msg[FINAL_MSG_FINAL_TX_TS_IDX], final_tx_ts);
-            
-            tag_final_msg[2] = frame_seq_nb;
-            tag_final_msg[5] = anchor_addresses[target_anchor][0]; // Set Anchor Address
-            tag_final_msg[6] = anchor_addresses[target_anchor][1]; // Set Anchor Address
 
+            tag_final_msg[2] = frame_seq_nb;
+            memcpy(&tag_final_msg[5], &anchor_addresses[target_anchor], 2); // Set Anchor Address
+
+            dwt_setrxtimeout(RESP_RX_TIMEOUT_UUS);
             // Sending the final message
             dwt_writetxdata(sizeof(tag_final_msg), tag_final_msg, 0);
             dwt_writetxfctrl(sizeof(tag_final_msg), 0, 1);
 
-            ret = dwt_starttx(DWT_START_TX_DELAYED);
+            ret = dwt_starttx(DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED);
             if (ret == DWT_SUCCESS) {
                 while (!(dwt_read32bitreg(SYS_STATUS_ID)& SYS_STATUS_TXFRS))
                 { };
                 dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_TXFRS); // clear TXFRS event
-                LOG_DBG("TX FINAL complete, SN: %02X", frame_seq_nb++);
+                LOG_DBG("TX FINAL complete, SN: %02X", frame_seq_nb);
+            }
+
+            // Listen anchor's REPORT message
+            while (!((status_reg = dwt_read32bitreg(SYS_STATUS_ID))
+                & (SYS_STATUS_RXFCG | SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR)))
+            { };
+
+            if (status_reg & SYS_STATUS_RXFCG) {
+                dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_RXFCG | SYS_STATUS_TXFRB );
+
+                frame_len = dwt_read32bitreg(RX_FINFO_ID) & RX_FINFO_RXFLEN_MASK;
+                if (frame_len <= RX_BUF_LEN) {
+                    dwt_readrxdata(rx_buffer, frame_len, 0);
+                }
+
+                float distance;
+                memcpy(&distance, &rx_buffer[10], sizeof(float));
+
+                char dist_str[16];
+                snprintf(dist_str, 16, "%.4f", distance);
+                LOG_INF("Distance: %s, SEQ: %d", log_strdup(dist_str), frame_seq_nb);
+
+                if(target_anchor == DEVCTRL_NUM_ANCHORS-1)
+                    frame_seq_nb++;
                 target_anchor = (target_anchor + 1) % DEVCTRL_NUM_ANCHORS; // Move to next anchor
+
+            } else {
+                LOG_ERR("** REPORT reception failed (timeout)");
+                dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_TO | SYS_STATUS_ALL_RX_ERR);
+                dwt_rxreset();
             }
         } else {
             LOG_ERR("** RESP reception failed (timeout)");
