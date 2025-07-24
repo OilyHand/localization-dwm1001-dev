@@ -1,0 +1,5 @@
+device nRF52832_XXAA
+if SWD
+speed 4000
+Erase
+exit

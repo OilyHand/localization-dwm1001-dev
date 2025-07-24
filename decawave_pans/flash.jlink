@@ -1,0 +1,9 @@
+device nRF52832_XXAA
+if SWD
+speed 4000
+r
+h
+loadfile "C:\Users\sonji\projects\localization\decawave_pans\DWM1001_PANS_R2.0.hex"
+r
+g
+exit
