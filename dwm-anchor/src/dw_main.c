@@ -58,17 +58,19 @@ typedef unsigned long long uint64;
 
 // Device IDs (Used for skipping discovery phase)
 #define DEVICE_TAG_ID 0xAA01
-#ifdef DEVICE_ANCHOR_01
-    #define DEVICE_ANC_ID 0xBB01
-#elif DEVICE_ANCHOR_02
-    #define DEVICE_ANC_ID 0xBB02
-#elif DEVICE_ANCHOR_03
-    #define DEVICE_ANC_ID 0xBB03
-#elif DEVICE_ANCHOR_04
-    #define DEVICE_ANC_ID 0xBB04
-#else
-    #define DEVICE_ANC_ID 0xBB01 // Default ID
-#endif
+#define DEVICE_ANC_ID 0xBB01
+
+// #ifdef DEVICE_ANCHOR_01
+//     #define DEVICE_ANC_ID 0xBB01
+// #elif DEVICE_ANCHOR_02
+//     #define DEVICE_ANC_ID 0xBB02
+// #elif DEVICE_ANCHOR_03
+//     #define DEVICE_ANC_ID 0xBB03
+// #elif DEVICE_ANCHOR_04
+//     #define DEVICE_ANC_ID 0xBB04
+// #else
+//     #define DEVICE_ANC_ID 0xBB01 // Default ID
+// #endif
 
 
 /**
